@@ -25,7 +25,7 @@
 #include <string>
 #include <vector>
 
-#include "controller_interface/controller_interface.hpp"
+#include "controller_interface/chainable_controller_interface.hpp"
 #include "diff_drive_controller/odometry.hpp"
 #include "diff_drive_controller/speed_limiter.hpp"
 #include "geometry_msgs/msg/twist_stamped.hpp"
@@ -41,7 +41,7 @@
 
 namespace diff_drive_controller
 {
-class DiffDriveController : public controller_interface::ControllerInterface
+class DiffDriveController : public controller_interface::ChainableControllerInterface
 {
   using TwistStamped = geometry_msgs::msg::TwistStamped;
 
@@ -52,7 +52,11 @@ public:
 
   controller_interface::InterfaceConfiguration state_interface_configuration() const override;
 
-  controller_interface::return_type update(
+  // Chainable controller replaces update() with the following two functions
+  controller_interface::return_type update_reference_from_subscribers(
+    const rclcpp::Time & time, const rclcpp::Duration & period) override;
+
+  controller_interface::return_type update_and_write_commands(
     const rclcpp::Time & time, const rclcpp::Duration & period) override;
 
   controller_interface::CallbackReturn on_init() override;
@@ -76,6 +80,10 @@ public:
     const rclcpp_lifecycle::State & previous_state) override;
 
 protected:
+  bool on_set_chained_mode(bool chained_mode) override;
+  
+  std::vector<hardware_interface::CommandInterface> on_export_reference_interfaces() override;
+  
   struct WheelHandle
   {
     std::reference_wrapper<const hardware_interface::LoanedStateInterface> feedback;
