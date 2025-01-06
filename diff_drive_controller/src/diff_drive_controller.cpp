@@ -278,8 +278,16 @@ controller_interface::return_type DiffDriveController::update_and_write_commands
   // Set wheels velocities:
   for (size_t index = 0; index < static_cast<size_t>(wheels_per_side_); ++index)
   {
-    registered_left_wheel_handles_[index].velocity.get().set_value(velocity_left);
-    registered_right_wheel_handles_[index].velocity.get().set_value(velocity_right);
+    bool success = registered_left_wheel_handles_[index].velocity.get().set_value(velocity_left);
+    if (!success) {
+      RCLCPP_ERROR(logger, "Failed to set velocity for left wheel %zu", index);
+      return controller_interface::return_type::ERROR;
+    }
+    success = registered_right_wheel_handles_[index].velocity.get().set_value(velocity_right);
+    if (!success) {
+      RCLCPP_ERROR(logger, "Failed to set velocity for right wheel %zu", index);
+      return controller_interface::return_type::ERROR;
+    }
   }
 
   return controller_interface::return_type::OK;
@@ -597,11 +605,14 @@ controller_interface::CallbackReturn DiffDriveController::on_shutdown(
 
 void DiffDriveController::halt()
 {
-  const auto halt_wheels = [](auto & wheel_handles)
+  const auto halt_wheels = [this](auto & wheel_handles)
   {
-    for (const auto & wheel_handle : wheel_handles)
+    for (size_t index = 0; index < wheel_handles.size(); ++index)
     {
-      wheel_handle.velocity.get().set_value(0.0);
+      bool success = wheel_handles[index].velocity.get().set_value(0.0);
+      if (!success) {
+        RCLCPP_ERROR(get_node()->get_logger(), "Failed to set velocity for wheel %zu", index);
+      }
     }
   };
 
