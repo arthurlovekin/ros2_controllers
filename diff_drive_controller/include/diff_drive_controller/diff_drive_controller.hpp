@@ -25,7 +25,7 @@
 #include <string>
 #include <vector>
 
-#include "controller_interface/controller_interface.hpp"
+#include "controller_interface/chainable_controller_interface.hpp"
 #include "diff_drive_controller/odometry.hpp"
 #include "diff_drive_controller/speed_limiter.hpp"
 #include "geometry_msgs/msg/twist_stamped.hpp"
@@ -41,7 +41,7 @@
 
 namespace diff_drive_controller
 {
-class DiffDriveController : public controller_interface::ControllerInterface
+class DiffDriveController : public controller_interface::ChainableControllerInterface
 {
   using TwistStamped = geometry_msgs::msg::TwistStamped;
 
@@ -52,8 +52,12 @@ public:
 
   controller_interface::InterfaceConfiguration state_interface_configuration() const override;
 
-  controller_interface::return_type update(
+  controller_interface::return_type
+  update_reference_from_subscribers(
     const rclcpp::Time & time, const rclcpp::Duration & period) override;
+
+  controller_interface::return_type
+  update_and_write_commands(const rclcpp::Time & time, const rclcpp::Duration & period) override;
 
   controller_interface::CallbackReturn on_init() override;
 
@@ -75,7 +79,15 @@ public:
   controller_interface::CallbackReturn on_shutdown(
     const rclcpp_lifecycle::State & previous_state) override;
 
+  using ControllerTwistReferenceMsg = geometry_msgs::msg::TwistStamped;
+
 protected:
+
+    bool on_set_chained_mode(bool chained_mode) override;
+
+  std::vector<hardware_interface::CommandInterface> on_export_reference_interfaces() override;
+
+
   struct WheelHandle
   {
     std::reference_wrapper<const hardware_interface::LoanedStateInterface> feedback;
@@ -103,7 +115,7 @@ protected:
   Odometry odometry_;
 
   // Timeout to consider cmd_vel commands old
-  std::chrono::milliseconds cmd_vel_timeout_{500};
+  rclcpp::Duration ref_timeout_ = rclcpp::Duration::from_seconds(0.5);
 
   std::shared_ptr<rclcpp::Publisher<nav_msgs::msg::Odometry>> odometry_publisher_ = nullptr;
   std::shared_ptr<realtime_tools::RealtimePublisher<nav_msgs::msg::Odometry>>
@@ -142,6 +154,12 @@ protected:
 
   bool reset();
   void halt();
+
+  private:
+  // callback for topic interface
+  void reference_callback(
+    const std::shared_ptr<ControllerTwistReferenceMsg> msg);
+  void reference_callback_unstamped(const std::shared_ptr<geometry_msgs::msg::Twist> msg);
 };
 }  // namespace diff_drive_controller
 #endif  // DIFF_DRIVE_CONTROLLER__DIFF_DRIVE_CONTROLLER_HPP_
