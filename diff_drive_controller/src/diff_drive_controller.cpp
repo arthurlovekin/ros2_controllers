@@ -46,7 +46,7 @@ using hardware_interface::HW_IF_VELOCITY;
 using lifecycle_msgs::msg::State;
 
 DiffDriveController::DiffDriveController()
-: controller_interface::ControllerInterface(),
+: controller_interface::ChainableControllerInterface(),
   // dummy limiter, will be created in on_configure
   // could be done with shared_ptr instead -> but will break ABI
   limiter_angular_(std::numeric_limits<double>::quiet_NaN()),
@@ -104,8 +104,8 @@ InterfaceConfiguration DiffDriveController::state_interface_configuration() cons
   return {interface_configuration_type::INDIVIDUAL, conf_names};
 }
 
-controller_interface::return_type DiffDriveController::update(
-  const rclcpp::Time & time, const rclcpp::Duration & period)
+controller_interface::return_type DiffDriveController::update_reference_from_subscribers(
+  const rclcpp::Time & time, const rclcpp::Duration & /*period*/)
 {
   auto logger = get_node()->get_logger();
   if (get_lifecycle_state().id() == State::PRIMARY_STATE_INACTIVE)
@@ -136,13 +136,24 @@ controller_interface::return_type DiffDriveController::update(
     last_command_msg_->twist.angular.z = 0.0;
   }
 
-  // command may be limited further by SpeedLimit,
-  // without affecting the stored twist command
-  TwistStamped command = *last_command_msg_;
-  double & linear_command = command.twist.linear.x;
-  double & angular_command = command.twist.angular.z;
+  reference_interfaces_[0] = last_command_msg_->twist.linear.x;
+  reference_interfaces_[1] = last_command_msg_->twist.angular.z;
 
   previous_update_timestamp_ = time;
+
+  return controller_interface::return_type::OK;
+}
+
+controller_interface::return_type DiffDriveController::update_and_write_commands(
+  const rclcpp::Time & time, const rclcpp::Duration & period)
+{
+  auto logger = get_node()->get_logger();
+
+  // // command may be limited further by SpeedLimit,
+  // // without affecting the stored twist command
+  TwistStamped command = *last_command_msg_;
+  double linear_command = reference_interfaces_[0];
+  double angular_command = reference_interfaces_[1];
 
   // Apply (possibly new) multipliers:
   const double wheel_separation = params_.wheel_separation_multiplier * params_.wheel_separation;
@@ -649,9 +660,34 @@ controller_interface::CallbackReturn DiffDriveController::configure_side(
 
   return controller_interface::CallbackReturn::SUCCESS;
 }
+
+bool DiffDriveController::on_set_chained_mode(bool chained_mode)
+{
+  // Always accept switch to/from chained mode
+  return true || chained_mode;
+}
+
+std::vector<hardware_interface::CommandInterface> DiffDriveController::on_export_reference_interfaces()
+{
+  const int nr_ref_itfs = 2;
+  reference_interfaces_.resize(nr_ref_itfs, std::numeric_limits<double>::quiet_NaN());
+  std::vector<hardware_interface::CommandInterface> reference_interfaces;
+  reference_interfaces.reserve(nr_ref_itfs);
+
+  reference_interfaces.push_back(hardware_interface::CommandInterface(
+    get_node()->get_name(), std::string("linear/") + hardware_interface::HW_IF_VELOCITY,
+    &reference_interfaces_[0]));
+
+  reference_interfaces.push_back(hardware_interface::CommandInterface(
+    get_node()->get_name(), std::string("angular/") + hardware_interface::HW_IF_VELOCITY,
+    &reference_interfaces_[1]));
+
+  return reference_interfaces;
+}
+
 }  // namespace diff_drive_controller
 
 #include "class_loader/register_macro.hpp"
 
 CLASS_LOADER_REGISTER_CLASS(
-  diff_drive_controller::DiffDriveController, controller_interface::ControllerInterface)
+  diff_drive_controller::DiffDriveController, controller_interface::ChainableControllerInterface)
